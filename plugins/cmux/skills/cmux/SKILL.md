@@ -1,6 +1,6 @@
 ---
 name: cmux
-description: Coordinate with peer Claude sessions via the `cmux` CLI. Use when $CMUX_SESSION is set in the environment (you are running inside a cmux-wrapped session), or when the user references "another session / another terminal / claude-N" and asks you to talk to it. Lets you list peer sessions and inject messages into them as if the user had typed there.
+description: Coordinate with peer Claude sessions via the `cmux` CLI. Use when $CMUX_SESSION is set in the environment (you are running inside a cmux-wrapped session), or when the user references "another session / another terminal / claude-N" and asks you to talk to it. Lets you list peer sessions and inject messages into them as if the user had typed there. NOTE: this plugin only ships the skill — the `cmux` CLI binary must be installed separately (see Prerequisite below).
 ---
 
 # cmux — peer session coordination
@@ -8,6 +8,28 @@ description: Coordinate with peer Claude sessions via the `cmux` CLI. Use when $
 You are running inside a `cmux`-wrapped session iff `$CMUX_SESSION` is set in
 your shell environment. The value is your own session name (e.g. `claude-1`).
 Other peer sessions live as unix sockets under `~/.cmux/<name>.sock`.
+
+## Prerequisite
+
+Before any other step, verify the CLI is installed:
+
+```bash
+command -v cmux
+```
+
+If this returns nothing (i.e. `cmux: command not found` when you try to use
+it), the plugin is installed but the CLI is not. Stop and tell the user:
+
+> The `cmux` CLI is not installed. Install it with:
+>
+> ```
+> curl -sSL https://raw.githubusercontent.com/echoulen/cmux/main/install.sh | bash
+> ```
+>
+> Then make sure `~/.local/bin` is on your PATH and re-run the request.
+
+Do not attempt to install it yourself, fall back to ad-hoc pty hacks, or
+guess at peer-session bytes through other means.
 
 ## When to use
 
