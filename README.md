@@ -11,10 +11,17 @@ command.
 curl -sSL https://raw.githubusercontent.com/echoulen/cmux/main/install.sh | bash
 ```
 
-Clones to `~/.local/share/cmux` and symlinks `~/.local/bin/cmux`. Re-running
-updates in place. Override paths with `CMUX_INSTALL_DIR` / `CMUX_BIN_DIR`.
+Symlinks `cmux` into `~/.local/bin` (source kept at `~/.local/share/cmux`).
+Re-run the same command to update.
 
-Manual:
+**Optional** — override default paths:
+
+```bash
+CMUX_INSTALL_DIR=/opt/cmux CMUX_BIN_DIR=/usr/local/bin \
+  curl -sSL https://raw.githubusercontent.com/echoulen/cmux/main/install.sh | bash
+```
+
+**Optional** — manual install instead:
 
 ```bash
 git clone https://github.com/echoulen/cmux.git ~/.local/share/cmux
