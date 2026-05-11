@@ -39,6 +39,21 @@ Each wrapped child gets `CMUX_SESSION=<name>` in its env. When `cmux send` runs
 inside a wrapped session, it auto-prefixes the message with `[from <name>] `
 so the receiver knows the source.
 
+## Claude Code plugin
+
+This repo also ships a Claude Code plugin (a single skill named `cmux`) that
+teaches the agent to detect `$CMUX_SESSION` and coordinate with peer sessions.
+Install via the Claude Code marketplace:
+
+```
+/plugin marketplace add echoulen/cmux
+/plugin install cmux@cmux
+```
+
+After install, agents running inside `cmux run -- claude ...` will
+automatically know they can `cmux list` peers and `cmux send <name> ...` to
+hand off work.
+
 ## How it works
 
 ```

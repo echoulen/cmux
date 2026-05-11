@@ -1,0 +1,21 @@
+{
+  "name": "cmux",
+  "owner": {
+    "name": "echoulen",
+    "email": "echoulen@gmail.com"
+  },
+  "description": "cmux — minimal pty wrapper for Claude Code sessions, plus a skill teaching agents to coordinate via cmux send.",
+  "version": "0.1.0",
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "cmux",
+      "source": "./plugins/cmux",
+      "description": "Skill that teaches Claude Code agents to detect $CMUX_SESSION and coordinate with peer sessions via `cmux send`.",
+      "version": "0.1.0",
+      "license": "MIT"
+    }
+  ]
+}
