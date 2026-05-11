@@ -8,8 +8,17 @@ command.
 ## Install
 
 ```bash
-git clone git@github.com:echoulen/cmux.git
-ln -s "$(pwd)/cmux/cmux" ~/.local/bin/cmux
+curl -sSL https://raw.githubusercontent.com/echoulen/cmux/main/install.sh | bash
+```
+
+Clones to `~/.local/share/cmux` and symlinks `~/.local/bin/cmux`. Re-running
+updates in place. Override paths with `CMUX_INSTALL_DIR` / `CMUX_BIN_DIR`.
+
+Manual:
+
+```bash
+git clone https://github.com/echoulen/cmux.git ~/.local/share/cmux
+ln -s ~/.local/share/cmux/cmux ~/.local/bin/cmux
 ```
 
 Python 3.9+ stdlib only.
