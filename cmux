@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""cmux — minimal Claude Code session multiplexer with side-channel input.
+
+Spawns a child program inside a pty and forwards bytes transparently between
+the host terminal and the child. Also opens a unix socket so other processes
+can inject input as if the user had typed it.
+
+  cmux run <name> [-- cmd args...]   Start a wrapped session (default: $SHELL)
+  cmux send <name> <message>         Send <message>+Enter to <name>
+  cmux list                          List active sessions
+  cmux help                          Show help
+"""
+from __future__ import annotations
+
+import errno
+import fcntl
+import os
+import pty
+import select
+import signal
+import socket
+import sys
+import termios
+import tty
+
+
+SOCK_DIR = os.path.expanduser("~/.cmux")
+
+
+def sock_path(name: str) -> str:
+    return os.path.join(SOCK_DIR, f"{name}.sock")
+
+
+def ensure_sock_dir() -> None:
+    os.makedirs(SOCK_DIR, mode=0o700, exist_ok=True)
+
+
+def set_pty_size(pty_fd: int, ref_fd: int) -> None:
+    """Copy ref_fd's window size onto pty_fd."""
+    try:
+        size = fcntl.ioctl(ref_fd, termios.TIOCGWINSZ, b"\x00" * 8)
+        fcntl.ioctl(pty_fd, termios.TIOCSWINSZ, size)
+    except OSError:
+        pass
+
+
+def _is_socket_alive(path: str) -> bool:
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(0.1)
+        s.connect(path)
+        s.close()
+        return True
+    except (ConnectionRefusedError, FileNotFoundError, socket.timeout, OSError):
+        return False
+
+
+def cmd_run(name: str, child_cmd: list[str]) -> int:
+    ensure_sock_dir()
+    path = sock_path(name)
+
+    if os.path.exists(path):
+        if _is_socket_alive(path):
+            print(f"cmux: session '{name}' already running", file=sys.stderr)
+            return 1
+        # stale leftover
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+    if not child_cmd:
+        child_cmd = [os.environ.get("SHELL", "/bin/bash")]
+
+    pid, pty_fd = pty.fork()
+    if pid == 0:
+        try:
+            os.execvp(child_cmd[0], child_cmd)
+        except FileNotFoundError:
+            sys.stderr.write(f"cmux: command not found: {child_cmd[0]}\n")
+            os._exit(127)
+
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        srv.bind(path)
+    except OSError as e:
+        print(f"cmux: bind {path}: {e}", file=sys.stderr)
+        os.kill(pid, signal.SIGTERM)
+        return 1
+    os.chmod(path, 0o600)
+    srv.listen(8)
+    srv.setblocking(False)
+
+    in_fd = sys.stdin.fileno()
+    out_fd = sys.stdout.fileno()
+    ref_fd = out_fd if os.isatty(out_fd) else in_fd
+    old_attrs = None
+    if os.isatty(in_fd):
+        old_attrs = termios.tcgetattr(in_fd)
+        tty.setraw(in_fd)
+    set_pty_size(pty_fd, ref_fd)
+
+    def _winch(_signum, _frame):
+        set_pty_size(pty_fd, ref_fd)
+        try:
+            os.kill(pid, signal.SIGWINCH)
+        except ProcessLookupError:
+            pass
+
+    signal.signal(signal.SIGWINCH, _winch)
+    # Make sure SIGHUP/SIGTERM trigger our finally cleanup
+    signal.signal(signal.SIGHUP, lambda *_: sys.exit(0))
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+
+    clients: list[socket.socket] = []
+
+    def cleanup():
+        if old_attrs is not None:
+            try:
+                termios.tcsetattr(in_fd, termios.TCSADRAIN, old_attrs)
+            except termios.error:
+                pass
+        try:
+            srv.close()
+        except OSError:
+            pass
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        for c in clients:
+            try:
+                c.close()
+            except OSError:
+                pass
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            pass
+
+    try:
+        while True:
+            rfds = [in_fd, pty_fd, srv.fileno()] + [c.fileno() for c in clients]
+            try:
+                ready, _, _ = select.select(rfds, [], [])
+            except (InterruptedError, OSError) as e:
+                if isinstance(e, OSError) and e.errno != errno.EINTR:
+                    raise
+                continue
+
+            for fd in ready:
+                if fd == in_fd:
+                    try:
+                        data = os.read(in_fd, 4096)
+                    except OSError:
+                        return 0
+                    if not data:
+                        return 0
+                    os.write(pty_fd, data)
+                elif fd == pty_fd:
+                    try:
+                        data = os.read(pty_fd, 4096)
+                    except OSError:
+                        return 0
+                    if not data:
+                        return 0
+                    os.write(out_fd, data)
+                elif fd == srv.fileno():
+                    try:
+                        client, _ = srv.accept()
+                    except BlockingIOError:
+                        continue
+                    client.setblocking(False)
+                    clients.append(client)
+                else:
+                    client = next((c for c in clients if c.fileno() == fd), None)
+                    if client is None:
+                        continue
+                    try:
+                        data = client.recv(4096)
+                    except (BlockingIOError, ConnectionResetError, OSError):
+                        clients.remove(client)
+                        client.close()
+                        continue
+                    if not data:
+                        clients.remove(client)
+                        client.close()
+                        continue
+                    os.write(pty_fd, data)
+    finally:
+        cleanup()
+
+
+def cmd_send(name: str, message: str) -> int:
+    path = sock_path(name)
+    if not os.path.exists(path):
+        print(f"cmux: session '{name}' not found", file=sys.stderr)
+        cmd_list(to_stderr=True)
+        return 1
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(path)
+    except (ConnectionRefusedError, FileNotFoundError) as e:
+        print(f"cmux: cannot connect to '{name}': {e}", file=sys.stderr)
+        return 1
+    # Append CR so the receiving program sees the user pressed Enter.
+    s.sendall(message.encode("utf-8") + b"\r")
+    s.close()
+    return 0
+
+
+def cmd_list(to_stderr: bool = False) -> int:
+    out = sys.stderr if to_stderr else sys.stdout
+    if not os.path.isdir(SOCK_DIR):
+        print("(no active cmux sessions)", file=sys.stderr)
+        return 0
+    alive: list[str] = []
+    for entry in sorted(os.listdir(SOCK_DIR)):
+        if not entry.endswith(".sock"):
+            continue
+        name = entry[:-5]
+        path = os.path.join(SOCK_DIR, entry)
+        if _is_socket_alive(path):
+            alive.append(name)
+        else:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+    if not alive:
+        print("(no active cmux sessions)", file=sys.stderr)
+        return 0
+    if to_stderr:
+        print("available sessions:", file=sys.stderr)
+        for name in alive:
+            print(f"  {name}", file=sys.stderr)
+    else:
+        print("NAME", file=out)
+        for name in alive:
+            print(name, file=out)
+    return 0
+
+
+HELP = """\
+cmux — minimal Claude Code session multiplexer
+
+Usage:
+  cmux run <name> [-- cmd args...]   Start a wrapped session (default: $SHELL)
+  cmux send <name> <message>         Send <message>+Enter to <name>
+  cmux list                          List active sessions
+  cmux help                          Show this help
+
+Examples:
+  cmux run claude-1 -- claude --permission-mode bypassPermissions
+  cmux send claude-1 "幫我看 /tmp/foo.txt"
+  cmux list
+
+Sockets live under ~/.cmux/<name>.sock.
+"""
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
+        sys.stdout.write(HELP)
+        return 0
+    cmd = argv[1]
+    if cmd == "run":
+        if len(argv) < 3:
+            print("usage: cmux run <name> [-- cmd args...]", file=sys.stderr)
+            return 2
+        name = argv[2]
+        rest = argv[3:]
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        return cmd_run(name, rest)
+    if cmd == "send":
+        if len(argv) < 4:
+            print("usage: cmux send <name> <message>", file=sys.stderr)
+            return 2
+        return cmd_send(argv[2], " ".join(argv[3:]))
+    if cmd in ("list", "ls"):
+        return cmd_list()
+    print(f"cmux: unknown command '{cmd}'", file=sys.stderr)
+    sys.stderr.write(HELP)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
