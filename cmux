@@ -76,21 +76,49 @@ def _auto_name(child_cmd: list[str]) -> str:
 
 
 def _print_session_banner(name: str) -> None:
-    """One-shot stderr greeting printed when an auto-named session starts."""
+    """Rounded-box stderr banner printed when an auto-named session starts."""
     try:
         is_tty = os.isatty(sys.stderr.fileno())
     except (AttributeError, ValueError, OSError):
         is_tty = False
-    if not is_tty or os.environ.get("NO_COLOR"):
-        print(f"cmux: session {name}", file=sys.stderr)
-        print(f"      send: cmux send {name} <message>", file=sys.stderr)
-        return
-    BOLD = "\x1b[1m"
-    BOLD_CYAN = "\x1b[1;36m"
-    DIM = "\x1b[2m"
-    RESET = "\x1b[0m"
-    print(f"\U0001f4e1 {BOLD}cmux{RESET} · {BOLD_CYAN}{name}{RESET}", file=sys.stderr)
-    print(f"   {DIM}send: cmux send {name} <message>{RESET}", file=sys.stderr)
+    no_color = bool(os.environ.get("NO_COLOR")) or not is_tty
+
+    if no_color:
+        BOLD = BOLD_CYAN = DIM = RESET = ""
+    else:
+        BOLD = "\x1b[1m"
+        BOLD_CYAN = "\x1b[1;36m"
+        DIM = "\x1b[2m"
+        RESET = "\x1b[0m"
+
+    line_a = name
+    line_b = f"send: cmux send {name} <message>"
+
+    # Title segment "─ 📡 cmux " takes 10 visible cols (emoji renders as 2).
+    # Inner width must fit that plus at least one trailing dash, and the
+    # longest body line with 2-col left indent + 2-col right padding.
+    TITLE_SEG = 10
+    inner = max(TITLE_SEG + 1, 2 + max(len(line_a), len(line_b)) + 2)
+
+    top = (
+        f"╭─ {BOLD}\U0001f4e1 cmux{RESET} "
+        + "─" * (inner - TITLE_SEG)
+        + "╮"
+    )
+    body_a = (
+        f"│  {BOLD_CYAN}{line_a}{RESET}"
+        + " " * (inner - 2 - len(line_a))
+        + "│"
+    )
+    body_b = (
+        f"│  {DIM}{line_b}{RESET}"
+        + " " * (inner - 2 - len(line_b))
+        + "│"
+    )
+    bottom = "╰" + "─" * inner + "╯"
+
+    for row in (top, body_a, body_b, bottom):
+        print(row, file=sys.stderr)
 
 
 def cmd_run(name: str, child_cmd: list[str]) -> int:
