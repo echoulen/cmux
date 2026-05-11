@@ -84,11 +84,12 @@ def _print_session_banner(name: str) -> None:
     no_color = bool(os.environ.get("NO_COLOR")) or not is_tty
 
     if no_color:
-        BOLD = BOLD_CYAN = DIM = RESET = ""
+        BORDER = TITLE = NAME = HINT = RESET = ""
     else:
-        BOLD = "\x1b[1m"
-        BOLD_CYAN = "\x1b[1;36m"
-        DIM = "\x1b[2m"
+        BORDER = "\x1b[32m"        # green
+        TITLE = "\x1b[1;32m"       # bold green
+        NAME = "\x1b[1;92m"        # bold bright green
+        HINT = "\x1b[2m"           # dim
         RESET = "\x1b[0m"
 
     line_a = name
@@ -101,21 +102,20 @@ def _print_session_banner(name: str) -> None:
     inner = max(TITLE_SEG + 1, 2 + max(len(line_a), len(line_b)) + 2)
 
     top = (
-        f"╭─ {BOLD}\U0001f4e1 cmux{RESET} "
-        + "─" * (inner - TITLE_SEG)
-        + "╮"
+        f"{BORDER}╭─ {RESET}{TITLE}\U0001f4e1 cmux{RESET}"
+        f"{BORDER} " + "─" * (inner - TITLE_SEG) + f"╮{RESET}"
     )
     body_a = (
-        f"│  {BOLD_CYAN}{line_a}{RESET}"
+        f"{BORDER}│{RESET}  {NAME}{line_a}{RESET}"
         + " " * (inner - 2 - len(line_a))
-        + "│"
+        + f"{BORDER}│{RESET}"
     )
     body_b = (
-        f"│  {DIM}{line_b}{RESET}"
+        f"{BORDER}│{RESET}  {HINT}{line_b}{RESET}"
         + " " * (inner - 2 - len(line_b))
-        + "│"
+        + f"{BORDER}│{RESET}"
     )
-    bottom = "╰" + "─" * inner + "╯"
+    bottom = f"{BORDER}╰" + "─" * inner + f"╯{RESET}"
 
     for row in (top, body_a, body_b, bottom):
         print(row, file=sys.stderr)
