@@ -75,6 +75,24 @@ def _auto_name(child_cmd: list[str]) -> str:
         n += 1
 
 
+def _print_session_banner(name: str) -> None:
+    """One-shot stderr greeting printed when an auto-named session starts."""
+    try:
+        is_tty = os.isatty(sys.stderr.fileno())
+    except (AttributeError, ValueError, OSError):
+        is_tty = False
+    if not is_tty or os.environ.get("NO_COLOR"):
+        print(f"cmux: session {name}", file=sys.stderr)
+        print(f"      send: cmux send {name} <message>", file=sys.stderr)
+        return
+    BOLD = "\x1b[1m"
+    BOLD_CYAN = "\x1b[1;36m"
+    DIM = "\x1b[2m"
+    RESET = "\x1b[0m"
+    print(f"\U0001f4e1 {BOLD}cmux{RESET} · {BOLD_CYAN}{name}{RESET}", file=sys.stderr)
+    print(f"   {DIM}send: cmux send {name} <message>{RESET}", file=sys.stderr)
+
+
 def cmd_run(name: str, child_cmd: list[str]) -> int:
     ensure_sock_dir()
     path = sock_path(name)
@@ -303,10 +321,7 @@ def main(argv: list[str]) -> int:
         if not args or args[0] == "--":
             rest = args[1:] if args else []
             name = _auto_name(rest)
-            print(
-                f"cmux: session '{name}' (use: cmux send {name} <message>)",
-                file=sys.stderr,
-            )
+            _print_session_banner(name)
         else:
             name = args[0]
             rest = args[1:]
