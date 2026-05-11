@@ -5,10 +5,15 @@ Spawns a child program inside a pty and forwards bytes transparently between
 the host terminal and the child. Also opens a unix socket so other processes
 can inject input as if the user had typed it.
 
-  cmux run <name> [-- cmd args...]   Start a wrapped session (default: $SHELL)
-  cmux send <name> <message>         Send <message>+Enter to <name>
-  cmux list                          List active sessions
-  cmux help                          Show help
+  cmux run [<name>] [-- cmd args...]  Start a wrapped session (default: $SHELL)
+                                      Name auto-generated from cmd if omitted.
+  cmux send <name> <message>          Send <message>+Enter to <name>
+  cmux list                           List active sessions
+  cmux help                           Show help
+
+Each wrapped child gets CMUX_SESSION=<name> in its env. When `cmux send` is
+invoked from inside a wrapped session, it auto-prefixes the message with
+"[from <CMUX_SESSION>] " so the receiver knows where the poke came from.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ import signal
 import socket
 import sys
 import termios
+import time
 import tty
 
 
@@ -55,6 +61,20 @@ def _is_socket_alive(path: str) -> bool:
         return False
 
 
+def _auto_name(child_cmd: list[str]) -> str:
+    """Pick the lowest-numbered <prefix>-N that has no live socket."""
+    if child_cmd:
+        prefix = os.path.basename(child_cmd[0]) or "cmux"
+    else:
+        prefix = os.path.basename(os.environ.get("SHELL", "bash")) or "cmux"
+    n = 1
+    while True:
+        candidate = f"{prefix}-{n}"
+        if not _is_socket_alive(sock_path(candidate)):
+            return candidate
+        n += 1
+
+
 def cmd_run(name: str, child_cmd: list[str]) -> int:
     ensure_sock_dir()
     path = sock_path(name)
@@ -74,6 +94,7 @@ def cmd_run(name: str, child_cmd: list[str]) -> int:
 
     pid, pty_fd = pty.fork()
     if pid == 0:
+        os.environ["CMUX_SESSION"] = name
         try:
             os.execvp(child_cmd[0], child_cmd)
         except FileNotFoundError:
@@ -197,14 +218,22 @@ def cmd_send(name: str, message: str) -> int:
         print(f"cmux: session '{name}' not found", file=sys.stderr)
         cmd_list(to_stderr=True)
         return 1
+    sender = os.environ.get("CMUX_SESSION")
+    if sender and sender != name and message:
+        message = f"[from {sender}] {message}"
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         s.connect(path)
     except (ConnectionRefusedError, FileNotFoundError) as e:
         print(f"cmux: cannot connect to '{name}': {e}", file=sys.stderr)
         return 1
-    # Append CR so the receiving program sees the user pressed Enter.
-    s.sendall(message.encode("utf-8") + b"\r")
+    # Send the message and the trailing CR in two separate writes. Ink-based
+    # TUIs (Claude Code) treat a single chunk containing both as a paste, in
+    # which case the embedded \r becomes a literal newline instead of submit.
+    if message:
+        s.sendall(message.encode("utf-8"))
+        time.sleep(0.05)
+    s.sendall(b"\r")
     s.close()
     return 0
 
@@ -245,15 +274,20 @@ HELP = """\
 cmux — minimal Claude Code session multiplexer
 
 Usage:
-  cmux run <name> [-- cmd args...]   Start a wrapped session (default: $SHELL)
-  cmux send <name> <message>         Send <message>+Enter to <name>
-  cmux list                          List active sessions
-  cmux help                          Show this help
+  cmux run [<name>] [-- cmd args...]  Start a wrapped session (default: $SHELL)
+                                      Name auto-generated from cmd if omitted.
+  cmux send <name> <message>          Send <message>+Enter to <name>
+  cmux list                           List active sessions
+  cmux help                           Show this help
 
 Examples:
-  cmux run claude-1 -- claude --permission-mode bypassPermissions
+  cmux run -- claude --permission-mode bypassPermissions   # auto-named claude-1
+  cmux run claude-main -- claude                            # explicit name
   cmux send claude-1 "幫我看 /tmp/foo.txt"
   cmux list
+
+Inside a wrapped session, $CMUX_SESSION holds the current session name and
+`cmux send` auto-prefixes messages with "[from $CMUX_SESSION] ".
 
 Sockets live under ~/.cmux/<name>.sock.
 """
@@ -265,13 +299,19 @@ def main(argv: list[str]) -> int:
         return 0
     cmd = argv[1]
     if cmd == "run":
-        if len(argv) < 3:
-            print("usage: cmux run <name> [-- cmd args...]", file=sys.stderr)
-            return 2
-        name = argv[2]
-        rest = argv[3:]
-        if rest and rest[0] == "--":
-            rest = rest[1:]
+        args = argv[2:]
+        if not args or args[0] == "--":
+            rest = args[1:] if args else []
+            name = _auto_name(rest)
+            print(
+                f"cmux: session '{name}' (use: cmux send {name} <message>)",
+                file=sys.stderr,
+            )
+        else:
+            name = args[0]
+            rest = args[1:]
+            if rest and rest[0] == "--":
+                rest = rest[1:]
         return cmd_run(name, rest)
     if cmd == "send":
         if len(argv) < 4:

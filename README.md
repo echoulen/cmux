@@ -1,75 +1,57 @@
 # cmux
 
-Minimal Claude Code session multiplexer with side-channel input. Spawns a
-child program in a pty and forwards bytes **transparently** between the host
-terminal and the child — so colors, modifier keys (Shift+Enter), mouse, and
-copy-paste all behave as if you ran the command directly.
-
-Each session also exposes a unix socket that other processes can write into.
-Anything written there is delivered to the child as if you had typed it,
-which lets one Claude session "poke" another with a single command.
-
-## Why not tmux?
-
-tmux re-renders the inner terminal into a virtual screen, so truecolor,
-extended keys, and clipboard hand-off all have to be negotiated, and several
-combinations break in the IDE-integrated terminals where Claude Code lives.
-
-cmux does no rendering. It is a thin pty proxy that forwards bytes both ways
-verbatim, plus a side-channel socket.
+Minimal pty wrapper for Claude Code sessions. Forwards bytes verbatim (colors,
+modifier keys, mouse, clipboard all unchanged) and exposes a unix socket so
+other processes can inject input — one Claude can poke another with one shell
+command.
 
 ## Install
 
 ```bash
 git clone git@github.com:echoulen/cmux.git
-mkdir -p ~/.local/bin
 ln -s "$(pwd)/cmux/cmux" ~/.local/bin/cmux
 ```
 
-Requires Python 3.9+ (stdlib only).
+Python 3.9+ stdlib only.
 
-## Usage
+## Commands
 
 ```bash
-# Start a wrapped Claude session named "claude-1":
-cmux run claude-1 -- claude --permission-mode bypassPermissions
+cmux run [<name>] [-- cmd args...]   # wrap cmd in pty (default $SHELL)
+cmux send <name> <message>           # inject <message>+Enter into <name>
+cmux list                            # list active sessions
+```
 
-# From another terminal — poke claude-1 with a message:
-cmux send claude-1 "幫我看 /tmp/foo.txt"
+If `<name>` is omitted, defaults to `<basename(cmd)>-N`, picking the lowest
+free `N` (`claude-1`, `claude-2`, ...).
 
-# List active sessions:
+## Examples
+
+```bash
+cmux run -- claude --permission-mode bypassPermissions
+cmux send claude-1 "take a look at /tmp/foo.txt"
 cmux list
 ```
 
-A session lives only as long as the wrapper process. Closing the terminal
-that owns it kills the wrapped child (this is intentional — cmux does not
-provide detach/attach).
+## CMUX_SESSION
+
+Each wrapped child gets `CMUX_SESSION=<name>` in its env. When `cmux send` runs
+inside a wrapped session, it auto-prefixes the message with `[from <name>] `
+so the receiver knows the source.
 
 ## How it works
 
 ```
-[IDE terminal] ──stdin/stdout passthrough──> [cmux] ──pty──> [child]
+[host terminal] ──stdin/stdout passthrough──> [cmux] ──pty──> [child]
                                                 ▲
                                                 │ unix socket (~/.cmux/<name>.sock)
                                                 │
                                         [cmux send <name> "..."]
 ```
 
-The main loop `select()`s over stdin, the pty master fd, and the unix
-socket. Bytes from any input source are forwarded to the pty master; bytes
-from the pty master are forwarded to stdout. The host terminal is put into
-raw mode so escape sequences and modifier keys pass through unchanged.
-
-## IDE setup
-
-Replace your IDE's "Claude" launch command with:
-
-```bash
-cmux run claude-$$ -- claude --permission-mode bypassPermissions
-```
-
-`$$` gives each terminal a unique session name (process ID of the parent
-shell). For a deterministic name use `claude-1`, `claude-2`, etc.
+Host terminal in raw mode → escape sequences and modifier keys pass through.
+A session lives only as long as its wrapper; closing the owning terminal
+kills the child (cmux has no detach/attach).
 
 ## License
 
