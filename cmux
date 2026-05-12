@@ -288,7 +288,7 @@ def cmd_send(name: str, message: str, expect_reply: bool = False) -> int:
             return 1
     if sender and sender != name and message:
         if expect_reply:
-            reply_cmd = f'cmux send {sender} "<your answer>"'
+            reply_cmd = f'cmux send "{sender}" "<your answer>"'
             message = (
                 f"[Message from {sender} via cmux, reply via: {reply_cmd}] "
                 f"{message}"
@@ -388,6 +388,9 @@ def main(argv: list[str]) -> int:
         args = argv[2:]
         expect_reply = False
         positional: list[str] = []
+        # Flag scanning is greedy: '-r' and '--reply' are always consumed as
+        # flags, even if they appear after <name>. There is no '--' escape
+        # hatch. Acceptable here since session names never start with '-'.
         for a in args:
             if a in ("-r", "--reply"):
                 expect_reply = True
