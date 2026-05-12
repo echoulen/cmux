@@ -14,7 +14,8 @@ can inject input as if the user had typed it.
 Each wrapped child gets CMUX_SESSION=<name> in its env. When `cmux send` is
 invoked from inside a wrapped session, it auto-prefixes the message with
 "[Message from <CMUX_SESSION> via cmux] " so the receiver knows where the
-poke came from.
+poke came from. Adding `-r`/`--reply` further declares that the receiver is
+expected to echo an answer back via `cmux send <CMUX_SESSION>`.
 """
 from __future__ import annotations
 
@@ -350,7 +351,8 @@ cmux — minimal Claude Code session multiplexer
 Usage:
   cmux run [<name>] [-- cmd args...]  Start a wrapped session (default: $SHELL)
                                       Name auto-generated from cmd if omitted.
-  cmux send <name> <message>          Send <message>+Enter to <name>
+  cmux send [-r] <name> <message>     Send <message>+Enter to <name>
+                                      -r/--reply: request the receiver echo an answer back
   cmux list                           List active sessions
   cmux help                           Show this help
 
@@ -362,6 +364,8 @@ Examples:
 
 Inside a wrapped session, $CMUX_SESSION holds the current session name and
 `cmux send` auto-prefixes messages with "[Message from $CMUX_SESSION via cmux] ".
+Pass `-r`/`--reply` to additionally tell the receiver that an answer is
+expected back via `cmux send $CMUX_SESSION`.
 
 Sockets live under ~/.cmux/<name>.sock.
 """
