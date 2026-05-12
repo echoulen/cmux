@@ -8,7 +8,8 @@ can inject input as if the user had typed it.
   cmux run [<name>] [-- cmd args...]  Start a wrapped session (default: $SHELL)
                                       Name auto-generated from cmd if omitted.
   cmux send <name> <message>          Send <message>+Enter to <name>
-  cmux list                           List active sessions
+  cmux list [-l|--long]               List active sessions (-l adds cwd columns)
+  cmux statusline-widget              Print "§ cmux:<name>" if $CMUX_SESSION set
   cmux help                           Show help
 
 Each wrapped child gets CMUX_SESSION=<name> in its env. When `cmux send` is
@@ -342,6 +343,14 @@ def cmd_list(to_stderr: bool = False) -> int:
     return 0
 
 
+def cmd_statusline_widget() -> int:
+    """Print a one-line cmux marker if we're inside a wrapped session."""
+    name = os.environ.get("CMUX_SESSION")
+    if name:
+        sys.stdout.write(f"§ cmux:{name}\n")
+    return 0
+
+
 HELP = """\
 cmux — minimal Claude Code session multiplexer
 
@@ -350,7 +359,8 @@ Usage:
                                       Name auto-generated from cmd if omitted.
   cmux send [-r] <name> <message>     Send <message>+Enter to <name>
                                       -r/--reply: request the receiver echo an answer back
-  cmux list                           List active sessions
+  cmux list [-l|--long]               List active sessions (-l adds cwd columns)
+  cmux statusline-widget              Print "§ cmux:<name>" if $CMUX_SESSION set
   cmux help                           Show this help
 
 Examples:
@@ -411,6 +421,8 @@ def main(argv: list[str]) -> int:
         )
     if cmd in ("list", "ls"):
         return cmd_list()
+    if cmd == "statusline-widget":
+        return cmd_statusline_widget()
     print(f"cmux: unknown command '{cmd}'", file=sys.stderr)
     sys.stderr.write(HELP)
     return 2
