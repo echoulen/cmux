@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import json
 import os
 import pty
 import select
@@ -43,6 +44,35 @@ def sock_path(name: str) -> str:
 
 def ensure_sock_dir() -> None:
     os.makedirs(SOCK_DIR, mode=0o700, exist_ok=True)
+
+
+def _meta_path(name: str) -> str:
+    return os.path.join(SOCK_DIR, f"{name}.json")
+
+
+def _write_metadata(name: str, pid: int, cwd: str) -> None:
+    """Persist sidecar JSON. Best-effort — failure must not abort the session."""
+    path = _meta_path(name)
+    tmp = path + ".tmp"
+    payload = {"pid": pid, "cwd": cwd, "started_at": int(time.time())}
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def _read_metadata(name: str) -> dict | None:
+    try:
+        with open(_meta_path(name), "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
 
 
 def set_pty_size(pty_fd: int, ref_fd: int) -> None:
@@ -142,6 +172,8 @@ def cmd_run(name: str, child_cmd: list[str]) -> int:
     if not child_cmd:
         child_cmd = [os.environ.get("SHELL", "/bin/bash")]
 
+    start_cwd = os.getcwd()
+
     pid, pty_fd = pty.fork()
     if pid == 0:
         os.environ["CMUX_SESSION"] = name
@@ -159,6 +191,7 @@ def cmd_run(name: str, child_cmd: list[str]) -> int:
         os.kill(pid, signal.SIGTERM)
         return 1
     os.chmod(path, 0o600)
+    _write_metadata(name, pid, start_cwd)
     srv.listen(8)
     srv.setblocking(False)
 
@@ -197,6 +230,10 @@ def cmd_run(name: str, child_cmd: list[str]) -> int:
             pass
         try:
             os.unlink(path)
+        except FileNotFoundError:
+            pass
+        try:
+            os.unlink(_meta_path(name))
         except FileNotFoundError:
             pass
         for c in clients:
