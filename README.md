@@ -15,7 +15,13 @@ Two pieces, install in order. Plugin alone is useless without the CLI.
 curl -sSL https://raw.githubusercontent.com/echoulen/cmux/main/install.sh | bash
 ```
 
-Re-run the same command to update.
+Once installed, wrap a Claude session:
+
+```bash
+cmux run -- claude --permission-mode bypassPermissions   # opens claude-1
+```
+
+Re-run the curl command above to update.
 
 **2. Claude Code plugin** — optional. Adds a `cmux` skill so agents inside
 `cmux run -- claude ...` auto-discover peers and know how to handle incoming
@@ -43,7 +49,6 @@ receiver knows the source. Add `-r` / `--reply` to append a `⇄` symbol —
 echo an answer back via `cmux send <name>`.
 
 ```bash
-cmux run -- claude --permission-mode bypassPermissions   # opens claude-1
 cmux send claude-1 "take a look at /tmp/foo.txt"
 cmux list
 ```
