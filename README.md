@@ -131,6 +131,30 @@ they want to hand work off.
 Host terminal stays in raw mode. A session lives only as long as its
 wrapper; closing the owning terminal kills the child.
 
+## Show the session name in your Claude Code statusline
+
+`cmux` exports `CMUX_SESSION` inside every wrapped session and ships a tiny
+`cmux statusline-widget` helper that prints `§ cmux:<name>` (or nothing when
+not in a session). Wire it into Claude Code's `statusLine` setting two ways:
+
+**1. Vanilla `statusLine.command`.** In `~/.claude/settings.json`, replace
+your statusline with a tiny wrapper that appends the cmux marker:
+
+```json
+{
+  "statusLine": {
+    "command": "bash -lc 'echo \"$(your-existing-statusline)\" $(cmux statusline-widget)'"
+  }
+}
+```
+
+**2. As a `ccstatusline` custom widget.** Add a custom widget pointing at
+`cmux statusline-widget`; ccstatusline will render its stdout inline with
+the rest of your widgets.
+
+The helper is intentionally dumb: no JSON, no colour, no stdin. Composition
+belongs to whatever statusline tool you already use.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

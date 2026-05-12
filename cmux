@@ -8,7 +8,8 @@ can inject input as if the user had typed it.
   cmux run [<name>] [-- cmd args...]  Start a wrapped session (default: $SHELL)
                                       Name auto-generated from cmd if omitted.
   cmux send <name> <message>          Send <message>+Enter to <name>
-  cmux list                           List active sessions
+  cmux list [-l|--long]               List active sessions (-l adds cwd columns)
+  cmux statusline-widget              Print "§ cmux:<name>" if $CMUX_SESSION set
   cmux help                           Show help
 
 Each wrapped child gets CMUX_SESSION=<name> in its env. When `cmux send` is
@@ -22,11 +23,13 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import json
 import os
 import pty
 import select
 import signal
 import socket
+import subprocess
 import sys
 import termios
 import time
@@ -42,6 +45,123 @@ def sock_path(name: str) -> str:
 
 def ensure_sock_dir() -> None:
     os.makedirs(SOCK_DIR, mode=0o700, exist_ok=True)
+
+
+def _meta_path(name: str) -> str:
+    return os.path.join(SOCK_DIR, f"{name}.json")
+
+
+def _write_metadata(name: str, pid: int, cwd: str) -> None:
+    """Persist sidecar JSON. Best-effort — failure must not abort the session."""
+    path = _meta_path(name)
+    tmp = path + ".tmp"
+    payload = {"pid": pid, "cwd": cwd, "started_at": int(time.time())}
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def _read_metadata(name: str) -> dict | None:
+    try:
+        with open(_meta_path(name), "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _live_cwd(pid: int) -> str | None:
+    """Best-effort current cwd of pid. Returns None on any failure."""
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    try:
+        out = subprocess.run(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            capture_output=True, text=True, timeout=2,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    for line in out.stdout.splitlines():
+        if line.startswith("n"):
+            return line[1:]
+    return None
+
+
+def _tilde(path: str) -> str:
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
+def _iter_alive_sessions() -> list[str]:
+    """Sorted list of live session names; sweeps stale sockets and sidecars."""
+    if not os.path.isdir(SOCK_DIR):
+        return []
+    alive: list[str] = []
+    for entry in sorted(os.listdir(SOCK_DIR)):
+        if not entry.endswith(".sock"):
+            continue
+        name = entry[:-5]
+        sock = os.path.join(SOCK_DIR, entry)
+        if _is_socket_alive(sock):
+            alive.append(name)
+        else:
+            try:
+                os.unlink(sock)
+            except FileNotFoundError:
+                pass
+            try:
+                os.unlink(_meta_path(name))
+            except FileNotFoundError:
+                pass
+    return alive
+
+
+def _render_long_table(out, indent: str = "") -> None:
+    """Render the NAME / START / CWD table to `out`, prefixed by `indent`.
+
+    The "no active sessions" notice is informational, not data, so it always
+    goes to stderr — matching the default `cmux list` behaviour."""
+    names = _iter_alive_sessions()
+    if not names:
+        print(f"{indent}(no active cmux sessions)", file=sys.stderr)
+        return
+    rows: list[tuple[str, str, str]] = []
+    for name in names:
+        meta = _read_metadata(name)
+        if meta is None:
+            rows.append((name, "?", "?"))
+            continue
+        start_cwd = meta.get("cwd") or ""
+        pid = meta.get("pid")
+        live = _live_cwd(pid) if isinstance(pid, int) else None
+        start_disp = _tilde(start_cwd) if start_cwd else "?"
+        if live is None:
+            cwd_disp = "?"
+        elif start_cwd and live == start_cwd:
+            cwd_disp = "(same)"
+        else:
+            cwd_disp = _tilde(live)
+        rows.append((name, start_disp, cwd_disp))
+    headers = ("NAME", "START", "CWD")
+    cols = list(zip(*([headers] + rows)))
+    widths = [max(len(c) for c in col) for col in cols]
+    for row in [headers] + rows:
+        line = "  ".join(s.ljust(w) for s, w in zip(row, widths)).rstrip()
+        print(f"{indent}{line}", file=out)
 
 
 def set_pty_size(pty_fd: int, ref_fd: int) -> None:
@@ -141,6 +261,8 @@ def cmd_run(name: str, child_cmd: list[str]) -> int:
     if not child_cmd:
         child_cmd = [os.environ.get("SHELL", "/bin/bash")]
 
+    start_cwd = os.getcwd()
+
     pid, pty_fd = pty.fork()
     if pid == 0:
         os.environ["CMUX_SESSION"] = name
@@ -158,6 +280,7 @@ def cmd_run(name: str, child_cmd: list[str]) -> int:
         os.kill(pid, signal.SIGTERM)
         return 1
     os.chmod(path, 0o600)
+    _write_metadata(name, pid, start_cwd)
     srv.listen(8)
     srv.setblocking(False)
 
@@ -196,6 +319,10 @@ def cmd_run(name: str, child_cmd: list[str]) -> int:
             pass
         try:
             os.unlink(path)
+        except FileNotFoundError:
+            pass
+        try:
+            os.unlink(_meta_path(name))
         except FileNotFoundError:
             pass
         for c in clients:
@@ -265,7 +392,8 @@ def cmd_send(name: str, message: str, expect_reply: bool = False) -> int:
     path = sock_path(name)
     if not os.path.exists(path):
         print(f"cmux: session '{name}' not found", file=sys.stderr)
-        cmd_list(to_stderr=True)
+        print("available sessions:", file=sys.stderr)
+        _render_long_table(sys.stderr, indent="  ")
         return 1
     sender = os.environ.get("CMUX_SESSION")
     if expect_reply:
@@ -310,35 +438,32 @@ def cmd_send(name: str, message: str, expect_reply: bool = False) -> int:
     return 0
 
 
-def cmd_list(to_stderr: bool = False) -> int:
-    out = sys.stderr if to_stderr else sys.stdout
-    if not os.path.isdir(SOCK_DIR):
-        print("(no active cmux sessions)", file=sys.stderr)
-        return 0
-    alive: list[str] = []
-    for entry in sorted(os.listdir(SOCK_DIR)):
-        if not entry.endswith(".sock"):
-            continue
-        name = entry[:-5]
-        path = os.path.join(SOCK_DIR, entry)
-        if _is_socket_alive(path):
-            alive.append(name)
+def cmd_list(argv: list[str] | None = None) -> int:
+    long_form = False
+    for a in argv or []:
+        if a in ("-l", "--long"):
+            long_form = True
         else:
-            try:
-                os.unlink(path)
-            except FileNotFoundError:
-                pass
-    if not alive:
+            print(f"cmux: unknown argument '{a}'", file=sys.stderr)
+            return 2
+    if long_form:
+        _render_long_table(sys.stdout)
+        return 0
+    names = _iter_alive_sessions()
+    if not names:
         print("(no active cmux sessions)", file=sys.stderr)
         return 0
-    if to_stderr:
-        print("available sessions:", file=sys.stderr)
-        for name in alive:
-            print(f"  {name}", file=sys.stderr)
-    else:
-        print("NAME", file=out)
-        for name in alive:
-            print(name, file=out)
+    print("NAME")
+    for name in names:
+        print(name)
+    return 0
+
+
+def cmd_statusline_widget() -> int:
+    """Print a one-line cmux marker if we're inside a wrapped session."""
+    name = os.environ.get("CMUX_SESSION")
+    if name:
+        sys.stdout.write(f"§ cmux:{name}\n")
     return 0
 
 
@@ -350,7 +475,8 @@ Usage:
                                       Name auto-generated from cmd if omitted.
   cmux send [-r] <name> <message>     Send <message>+Enter to <name>
                                       -r/--reply: request the receiver echo an answer back
-  cmux list                           List active sessions
+  cmux list [-l|--long]               List active sessions (-l adds cwd columns)
+  cmux statusline-widget              Print "§ cmux:<name>" if $CMUX_SESSION set
   cmux help                           Show this help
 
 Examples:
@@ -410,7 +536,9 @@ def main(argv: list[str]) -> int:
             expect_reply=expect_reply,
         )
     if cmd in ("list", "ls"):
-        return cmd_list()
+        return cmd_list(argv[2:])
+    if cmd == "statusline-widget":
+        return cmd_statusline_widget()
     print(f"cmux: unknown command '{cmd}'", file=sys.stderr)
     sys.stderr.write(HELP)
     return 2
