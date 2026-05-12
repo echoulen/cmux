@@ -129,8 +129,63 @@ PY
   fi
 }
 
+test_list_default_unchanged() {
+  echo "test_list_default_unchanged"
+  spawn_session shell-list bash -lc 'sleep 30' || return
+  local out
+  out="$("$CMUX" list 2>&1)"
+  # Default form: a "NAME" header line followed by names, one per line.
+  if [[ "$(echo "$out" | head -n1)" == "NAME" ]]; then
+    ok "default list keeps NAME header"
+  else
+    bad "default list keeps NAME header" "got first line: $(echo "$out" | head -n1)"
+  fi
+  if echo "$out" | grep -qx "shell-list"; then
+    ok "default list contains the session name on its own line"
+  else
+    bad "default list contains the session name on its own line" "got: $out"
+  fi
+  # Cleanup before next test.
+  kill "${SESSION_PIDS[${#SESSION_PIDS[@]}-1]}" 2>/dev/null || true
+  sleep 0.3
+}
+
+test_list_long() {
+  echo "test_list_long"
+  spawn_session shell-long bash -lc 'sleep 30' || return
+  local out
+  out="$("$CMUX" list -l 2>&1)"
+  if [[ "$(echo "$out" | head -n1)" =~ ^NAME[[:space:]]+START[[:space:]]+CWD$ ]]; then
+    ok "list -l prints NAME / START / CWD header"
+  else
+    bad "list -l prints NAME / START / CWD header" "got: $(echo "$out" | head -n1)"
+  fi
+  if echo "$out" | grep -q "shell-long"; then
+    ok "list -l contains the session row"
+  else
+    bad "list -l contains the session row" "got: $out"
+  fi
+  # --long alias works.
+  out="$("$CMUX" list --long 2>&1)"
+  if [[ "$(echo "$out" | head -n1)" =~ ^NAME[[:space:]]+START[[:space:]]+CWD$ ]]; then
+    ok "list --long is accepted as an alias"
+  else
+    bad "list --long is accepted as an alias" "got: $(echo "$out" | head -n1)"
+  fi
+  # Unknown flag is rejected.
+  if "$CMUX" list -x 2>/dev/null; then
+    bad "list -x rejects unknown flag" "exit 0 unexpected"
+  else
+    ok "list -x rejects unknown flag"
+  fi
+  kill "${SESSION_PIDS[${#SESSION_PIDS[@]}-1]}" 2>/dev/null || true
+  sleep 0.3
+}
+
 test_statusline_widget
 test_sidecar_metadata
+test_list_default_unchanged
+test_list_long
 test_help
 
 echo
