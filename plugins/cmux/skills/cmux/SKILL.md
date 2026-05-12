@@ -77,8 +77,8 @@ treat it as a request that REQUIRES a reply:
    ```bash
    cmux send claude-1 "/Users/alice/work"
    ```
-   Do NOT send the literal six-character string `<your` `answer>` — that
-   placeholder exists only to mark where your answer goes.
+   Do NOT send the literal placeholder text `<your answer>` — it exists
+   only to mark where your real answer goes.
 3. If you cannot answer (refusal, missing info, blocked), still run the
    command — send a short string explaining why no answer is forthcoming,
    so the sender isn't left waiting.
