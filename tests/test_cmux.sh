@@ -182,10 +182,38 @@ test_list_long() {
   sleep 0.3
 }
 
+test_send_fallback_long() {
+  echo "test_send_fallback_long"
+  # Use a short name (send-fb) so the socket path stays under macOS's 104-byte
+  # sockaddr_un limit even when TEST_TMP lands in /var/folders/...
+  spawn_session send-fb bash -lc 'sleep 30' || return
+  # Sending to a nonexistent name must fail and dump the long-form table on stderr.
+  local err
+  err="$("$CMUX" send no-such-session hi 2>&1 >/dev/null || true)"
+  if echo "$err" | grep -q "available sessions:"; then
+    ok "send fallback prints 'available sessions:'"
+  else
+    bad "send fallback prints 'available sessions:'" "got: $err"
+  fi
+  if echo "$err" | grep -qE "^[[:space:]]+NAME[[:space:]]+START[[:space:]]+CWD$"; then
+    ok "send fallback shows long-form header"
+  else
+    bad "send fallback shows long-form header" "got: $err"
+  fi
+  if echo "$err" | grep -q "send-fb"; then
+    ok "send fallback lists the live session"
+  else
+    bad "send fallback lists the live session" "got: $err"
+  fi
+  kill "${SESSION_PIDS[${#SESSION_PIDS[@]}-1]}" 2>/dev/null || true
+  sleep 0.3
+}
+
 test_statusline_widget
 test_sidecar_metadata
 test_list_default_unchanged
 test_list_long
+test_send_fallback_long
 test_help
 
 echo
