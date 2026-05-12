@@ -13,8 +13,8 @@ can inject input as if the user had typed it.
 
 Each wrapped child gets CMUX_SESSION=<name> in its env. When `cmux send` is
 invoked from inside a wrapped session, it auto-prefixes the message with
-"[Message from <CMUX_SESSION> via cmux] " (bold green) so the receiver
-knows where the poke came from.
+"[Message from <CMUX_SESSION> via cmux] " so the receiver knows where the
+poke came from.
 """
 from __future__ import annotations
 
@@ -267,9 +267,7 @@ def cmd_send(name: str, message: str) -> int:
         return 1
     sender = os.environ.get("CMUX_SESSION")
     if sender and sender != name and message:
-        # Bold green for the prefix, matching the session-banner palette.
-        prefix = f"\x1b[1;32m[Message from {sender} via cmux]\x1b[0m"
-        message = f"{prefix} {message}"
+        message = f"[Message from {sender} via cmux] {message}"
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         s.connect(path)
@@ -336,8 +334,7 @@ Examples:
   cmux list
 
 Inside a wrapped session, $CMUX_SESSION holds the current session name and
-`cmux send` auto-prefixes messages with "[Message from $CMUX_SESSION via cmux] "
-(bold green).
+`cmux send` auto-prefixes messages with "[Message from $CMUX_SESSION via cmux] ".
 
 Sockets live under ~/.cmux/<name>.sock.
 """

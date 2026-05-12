@@ -37,7 +37,7 @@ cmux list                            # list active sessions
 Default name is `<basename(cmd)>-N` (`claude-1`, `claude-2`, ...). Each
 wrapped child gets `CMUX_SESSION=<name>` in its env; `cmux send` from inside
 a wrapped session auto-prefixes the message with `[Message from <name> via cmux] `
-(bold green) so the receiver knows the source.
+so the receiver knows the source.
 
 ```bash
 cmux run -- claude --permission-mode bypassPermissions   # opens claude-1
@@ -70,9 +70,7 @@ In terminal B, claude-2's input prompt receives:
 [Message from claude-1 via cmux] starting auth refactor in src/auth/ — please draft tests for login
 ```
 
-(`[Message from claude-1 via cmux]` is rendered in bold green so the user
-can spot the relay at a glance.) claude-2 acknowledges the source, writes
-the tests, then relays back:
+claude-2 acknowledges the source, writes the tests, then relays back:
 
 ```bash
 cmux send claude-1 "tests live in tests/auth/login.test.ts — 6 cases, all passing"

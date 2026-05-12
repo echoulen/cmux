@@ -1,6 +1,6 @@
 {
   "name": "cmux",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Skill that teaches Claude Code agents to detect $CMUX_SESSION and coordinate with peer sessions via `cmux send`.",
   "author": {
     "name": "echoulen",

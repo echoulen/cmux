@@ -48,8 +48,8 @@ cmux send <name> <message>    # inject "<message>\r" into <name>'s pty
 ```
 
 `cmux send` invoked from inside a wrapped session auto-prefixes the message
-with `[Message from $CMUX_SESSION via cmux] ` (bold green) — the receiver
-sees the source. You don't need to add the prefix yourself.
+with `[Message from $CMUX_SESSION via cmux] ` — the receiver sees the source.
+You don't need to add the prefix yourself.
 
 ## Workflow
 
