@@ -5,7 +5,9 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CMUX="${CMUX_BIN:-$REPO_ROOT/cmux}"
-TEST_TMP="$(mktemp -d -t cmux-test.XXXXXX)"
+# macOS sockaddr_un is capped at 104 bytes; the default $TMPDIR
+# (/var/folders/...) plus ~/.cmux/<name>.sock overflows it. Force /tmp.
+TEST_TMP="$(TMPDIR=/tmp mktemp -d -t cmux-test.XXXXXX)"
 # Isolate ~/.cmux for tests so we never touch the user's real sessions.
 # cmux resolves ~/.cmux from $HOME at startup, so override before invoking it.
 export HOME="$TEST_TMP/home"
@@ -37,10 +39,20 @@ bad() {
 }
 
 # Spawn `cmux run <name> -- <cmd...>` in the background. Records the pid.
+# cmux exits the moment its stdin EOFs, so /dev/null won't work — we wrap
+# the child in a real pty (same as how a human actually runs cmux).
 spawn_session() {
   local name="$1"; shift
-  python3 -c "import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" \
-    "$CMUX" run "$name" -- "$@" </dev/null >/dev/null 2>&1 &
+  python3 -c '
+import os, pty, signal, sys, time
+cmux, name, *args = sys.argv[1:]
+os.setsid()
+pid, _fd = pty.fork()
+if pid == 0:
+    os.execvp(cmux, [cmux, "run", name, "--"] + args)
+signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+time.sleep(3600)
+' "$CMUX" "$name" "$@" >/dev/null 2>&1 &
   SESSION_PIDS+=("$!")
   # Wait up to 2s for the socket to appear.
   for _ in $(seq 1 20); do
