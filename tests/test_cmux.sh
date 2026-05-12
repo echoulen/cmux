@@ -66,6 +66,25 @@ test_help() {
   fi
 }
 
+test_statusline_widget() {
+  echo "test_statusline_widget"
+  local out
+  out="$(CMUX_SESSION=claude-x "$CMUX" statusline-widget 2>&1)"
+  if [[ "$out" == "§ cmux:claude-x" ]]; then
+    ok "widget prints '§ cmux:<name>' when CMUX_SESSION is set"
+  else
+    bad "widget prints '§ cmux:<name>' when CMUX_SESSION is set" "got: $out"
+  fi
+
+  out="$(env -u CMUX_SESSION "$CMUX" statusline-widget 2>&1)"
+  if [[ -z "$out" ]]; then
+    ok "widget prints nothing when CMUX_SESSION is unset"
+  else
+    bad "widget prints nothing when CMUX_SESSION is unset" "got: $out"
+  fi
+}
+
+test_statusline_widget
 test_help
 
 echo
