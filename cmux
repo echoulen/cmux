@@ -259,15 +259,42 @@ def cmd_run(name: str, child_cmd: list[str]) -> int:
         cleanup()
 
 
-def cmd_send(name: str, message: str) -> int:
+def cmd_send(name: str, message: str, expect_reply: bool = False) -> int:
     path = sock_path(name)
     if not os.path.exists(path):
         print(f"cmux: session '{name}' not found", file=sys.stderr)
         cmd_list(to_stderr=True)
         return 1
     sender = os.environ.get("CMUX_SESSION")
+    if expect_reply:
+        if not sender:
+            print(
+                "cmux: -r requires running inside a wrapped session "
+                "(CMUX_SESSION unset)",
+                file=sys.stderr,
+            )
+            return 1
+        if sender == name:
+            print(
+                "cmux: cannot use -r when sending to yourself",
+                file=sys.stderr,
+            )
+            return 1
+        if not message:
+            print(
+                "cmux: -r requires a non-empty message",
+                file=sys.stderr,
+            )
+            return 1
     if sender and sender != name and message:
-        message = f"[Message from {sender} via cmux] {message}"
+        if expect_reply:
+            reply_cmd = f'cmux send {sender} "<your answer>"'
+            message = (
+                f"[Message from {sender} via cmux, reply via: {reply_cmd}] "
+                f"{message}"
+            )
+        else:
+            message = f"[Message from {sender} via cmux] {message}"
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         s.connect(path)
@@ -358,10 +385,25 @@ def main(argv: list[str]) -> int:
                 rest = rest[1:]
         return cmd_run(name, rest)
     if cmd == "send":
-        if len(argv) < 4:
-            print("usage: cmux send <name> <message>", file=sys.stderr)
+        args = argv[2:]
+        expect_reply = False
+        positional: list[str] = []
+        for a in args:
+            if a in ("-r", "--reply"):
+                expect_reply = True
+            else:
+                positional.append(a)
+        if len(positional) < 2:
+            print(
+                "usage: cmux send [-r|--reply] <name> <message>",
+                file=sys.stderr,
+            )
             return 2
-        return cmd_send(argv[2], " ".join(argv[3:]))
+        return cmd_send(
+            positional[0],
+            " ".join(positional[1:]),
+            expect_reply=expect_reply,
+        )
     if cmd in ("list", "ls"):
         return cmd_list()
     print(f"cmux: unknown command '{cmd}'", file=sys.stderr)
