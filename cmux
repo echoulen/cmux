@@ -131,10 +131,13 @@ def _iter_alive_sessions() -> list[str]:
 
 
 def _render_long_table(out, indent: str = "") -> None:
-    """Render the NAME / START / CWD table to `out`, prefixed by `indent`."""
+    """Render the NAME / START / CWD table to `out`, prefixed by `indent`.
+
+    The "no active sessions" notice is informational, not data, so it always
+    goes to stderr — matching the default `cmux list` behaviour."""
     names = _iter_alive_sessions()
     if not names:
-        print(f"{indent}(no active cmux sessions)", file=out)
+        print(f"{indent}(no active cmux sessions)", file=sys.stderr)
         return
     rows: list[tuple[str, str, str]] = []
     for name in names:
@@ -435,8 +438,7 @@ def cmd_send(name: str, message: str, expect_reply: bool = False) -> int:
     return 0
 
 
-def cmd_list(argv: list[str] | None = None, to_stderr: bool = False) -> int:
-    out = sys.stderr if to_stderr else sys.stdout
+def cmd_list(argv: list[str] | None = None) -> int:
     long_form = False
     for a in argv or []:
         if a in ("-l", "--long"):
@@ -445,20 +447,15 @@ def cmd_list(argv: list[str] | None = None, to_stderr: bool = False) -> int:
             print(f"cmux: unknown argument '{a}'", file=sys.stderr)
             return 2
     if long_form:
-        _render_long_table(out)
+        _render_long_table(sys.stdout)
         return 0
     names = _iter_alive_sessions()
     if not names:
         print("(no active cmux sessions)", file=sys.stderr)
         return 0
-    if to_stderr:
-        print("available sessions:", file=sys.stderr)
-        for name in names:
-            print(f"  {name}", file=sys.stderr)
-    else:
-        print("NAME", file=out)
-        for name in names:
-            print(name, file=out)
+    print("NAME")
+    for name in names:
+        print(name)
     return 0
 
 
