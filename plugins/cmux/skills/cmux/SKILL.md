@@ -66,9 +66,19 @@ treat it as a request that REQUIRES a reply:
 
 1. Produce your answer to `<body>` as you normally would. Your visible
    response to the user is unchanged — they can still see it locally.
-2. After answering, you MUST run `<command>`, replacing `<your answer>`
-   inside the command with a concise string that conveys your answer to the
-   sender. The sender is waiting on that exact channel.
+2. After answering, you MUST run `<command>`, replacing the literal
+   placeholder `<your answer>` inside the command with a concise string that
+   conveys your answer to the sender. The sender is waiting on that exact
+   channel.
+
+   Worked example: if the prefix you received says
+   `reply via: cmux send claude-1 "<your answer>"`, and your actual answer
+   is `/Users/alice/work`, run:
+   ```bash
+   cmux send claude-1 "/Users/alice/work"
+   ```
+   Do NOT send the literal six-character string `<your` `answer>` — that
+   placeholder exists only to mark where your answer goes.
 3. If you cannot answer (refusal, missing info, blocked), still run the
    command — send a short string explaining why no answer is forthcoming,
    so the sender isn't left waiting.
@@ -107,8 +117,12 @@ cmux send -r claude-2 "what's the current pwd in your session?"
 
 ## Caveats
 
-- One-way: `cmux send` only injects input. You will not see the peer's reply
-  unless the user relays it.
+- Fire-and-forget by default: a plain `cmux send` (no `-r`) only injects
+  input. You will not see the peer's reply unless the user relays it.
+- With `-r`: the peer's agent is obligated to send an answer back via
+  `cmux send $CMUX_SESSION "<their answer>"`, which lands in your input
+  prompt as a normal `[Message from <peer> via cmux] ...` line. There is no
+  programmatic correlation; just watch for the next inbound message.
 - The peer treats the injected text as user input — be careful with anything
   destructive, the peer may act on it without further confirmation.
 - If `$CMUX_SESSION` is unset, this skill does not apply — you are not inside
