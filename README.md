@@ -135,22 +135,39 @@ wrapper; closing the owning terminal kills the child.
 
 `cmux` exports `CMUX_SESSION` inside every wrapped session and ships a tiny
 `cmux statusline-widget` helper that prints `§ cmux:<name>` (or nothing when
-not in a session). Wire it into Claude Code's `statusLine` setting two ways:
+not in a session).
 
-**1. Vanilla `statusLine.command`.** In `~/.claude/settings.json`, replace
-your statusline with a tiny wrapper that appends the cmux marker:
+**One-shot:**
 
-```json
-{
-  "statusLine": {
-    "command": "bash -lc 'echo \"$(your-existing-statusline)\" $(cmux statusline-widget)'"
-  }
-}
+```bash
+cmux setup-statusline
 ```
 
-**2. As a `ccstatusline` custom widget.** Add a custom widget pointing at
-`cmux statusline-widget`; ccstatusline will render its stdout inline with
-the rest of your widgets.
+This detects your environment and (after a y/N prompt) wires the widget in:
+- ccstatusline user → appends a `custom-command` widget to its config
+- no `statusLine.command` set → installs the widget as your `statusLine` (bare
+  cmux marker only — install ccstatusline first if you want richer info)
+- custom/unknown `statusLine.command` → refuses to mutate; prints a pointer to
+  the manual recipes below
+
+Pass `-u`/`--uninstall` to reverse. Pass `-y`/`--yes` for non-interactive use.
+
+**Manual recipes**, if you prefer:
+
+1. **Vanilla `statusLine.command`.** In `~/.claude/settings.json`, replace
+   your statusline with a tiny wrapper that appends the cmux marker:
+
+   ```json
+   {
+     "statusLine": {
+       "command": "bash -lc 'echo \"$(your-existing-statusline)\" $(cmux statusline-widget)'"
+     }
+   }
+   ```
+
+2. **As a `ccstatusline` custom widget.** Add a custom widget pointing at
+   `cmux statusline-widget`; ccstatusline will render its stdout inline with
+   the rest of your widgets.
 
 The helper is intentionally dumb: no JSON, no colour, no stdin. Composition
 belongs to whatever statusline tool you already use.

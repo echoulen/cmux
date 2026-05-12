@@ -10,6 +10,7 @@ can inject input as if the user had typed it.
   cmux send <name> <message>          Send <message>+Enter to <name>
   cmux list [-l|--long]               List active sessions (-l adds cwd columns)
   cmux statusline-widget              Print "§ cmux:<name>" if $CMUX_SESSION set
+  cmux setup-statusline [-u] [-y]     Wire the widget into Claude Code's statusline
   cmux help                           Show help
 
 Each wrapped child gets CMUX_SESSION=<name> in its env. When `cmux send` is
@@ -27,6 +28,7 @@ import json
 import os
 import pty
 import select
+import shutil
 import signal
 import socket
 import subprocess
@@ -467,6 +469,217 @@ def cmd_statusline_widget() -> int:
     return 0
 
 
+WIDGET_CMD = "cmux statusline-widget"
+
+
+def _claude_settings_path() -> str:
+    return os.environ.get("CMUX_CLAUDE_SETTINGS") or os.path.expanduser(
+        "~/.claude/settings.json"
+    )
+
+
+def _ccstatusline_settings_path() -> str:
+    return os.environ.get("CMUX_CCSTATUSLINE_SETTINGS") or os.path.expanduser(
+        "~/.config/ccstatusline/settings.json"
+    )
+
+
+def _read_json(path: str) -> dict | None:
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_json_atomic(path: str, data: dict) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def _confirm(prompt: str, assume_yes: bool) -> bool:
+    if assume_yes:
+        print(f"{prompt}y  (--yes)")
+        return True
+    if not sys.stdin.isatty():
+        print(
+            "cmux: stdin is not a TTY; pass --yes to confirm non-interactively.",
+            file=sys.stderr,
+        )
+        return False
+    try:
+        ans = input(prompt).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return ans in ("y", "yes")
+
+
+def _fresh_id(used: set, hint: str) -> str:
+    if hint not in used:
+        return hint
+    n = 1
+    while True:
+        cand = f"{hint}-{n}"
+        if cand not in used:
+            return cand
+        n += 1
+
+
+def _looks_like_ccstatusline(command: str) -> bool:
+    if not command:
+        return False
+    # Crude but effective: any invocation of the ccstatusline binary.
+    return "ccstatusline" in command and shutil.which("ccstatusline") is not None
+
+
+def _setup_ccstatusline(uninstall: bool, assume_yes: bool) -> int:
+    path = _ccstatusline_settings_path()
+    if not os.path.exists(path):
+        if uninstall:
+            print(f"cmux: no {path}; nothing to remove.")
+            return 0
+        print(f"cmux: ccstatusline is on your PATH but {path} doesn't exist.")
+        print("    Run `ccstatusline` once to create its config, then re-run.")
+        return 1
+    cfg = _read_json(path)
+    if cfg is None:
+        print(f"cmux: could not parse {path}", file=sys.stderr)
+        return 1
+    lines = cfg.get("lines")
+    if not isinstance(lines, list) or not lines or not isinstance(lines[0], list):
+        print(f"cmux: unexpected schema in {path} (expected top-level 'lines' array of arrays).", file=sys.stderr)
+        return 1
+    line0 = lines[0]
+    widget_idx = next(
+        (i for i, w in enumerate(line0)
+         if isinstance(w, dict) and w.get("commandPath") == WIDGET_CMD),
+        -1,
+    )
+    if uninstall:
+        if widget_idx < 0:
+            print(f"cmux: widget not present in {path}; nothing to remove.")
+            return 0
+        if not _confirm(f"Remove `{WIDGET_CMD}` widget from {path}? [y/N] ", assume_yes):
+            print("aborted.")
+            return 1
+        # Drop the widget and the immediately-preceding separator if any.
+        new_line = list(line0)
+        del new_line[widget_idx]
+        if widget_idx > 0 and isinstance(new_line[widget_idx - 1], dict) \
+                and new_line[widget_idx - 1].get("type") == "separator":
+            del new_line[widget_idx - 1]
+        lines[0] = new_line
+        _write_json_atomic(path, cfg)
+        print(f"cmux: removed widget from {path}")
+        return 0
+    if widget_idx >= 0:
+        print(f"cmux: widget already present in {path}; nothing to do.")
+        return 0
+    print(f"cmux: will append a green `{WIDGET_CMD}` widget to {path} (line 1).")
+    if not _confirm("Proceed? [y/N] ", assume_yes):
+        print("aborted.")
+        return 1
+    used_ids = {str(w.get("id", "")) for w in line0 if isinstance(w, dict)}
+    sep_id = _fresh_id(used_ids, "cmux-sep")
+    widget_id = _fresh_id(used_ids | {sep_id}, "cmux-widget")
+    line0.append({"id": sep_id, "type": "separator"})
+    line0.append({
+        "id": widget_id,
+        "type": "custom-command",
+        "color": "green",
+        "commandPath": WIDGET_CMD,
+        "timeout": 500,
+    })
+    _write_json_atomic(path, cfg)
+    print(f"cmux: added widget to {path}")
+    print("    Claude Code's next statusline refresh will show § cmux:<name>.")
+    return 0
+
+
+def _setup_vanilla(uninstall: bool, assume_yes: bool, claude_settings: dict) -> int:
+    path = _claude_settings_path()
+    sl = claude_settings.get("statusLine")
+    already = isinstance(sl, dict) and sl.get("command") == WIDGET_CMD
+    if uninstall:
+        if not already:
+            print(f"cmux: statusLine in {path} doesn't point at cmux; nothing to remove.")
+            return 0
+        if not _confirm(f"Remove cmux statusLine block from {path}? [y/N] ", assume_yes):
+            print("aborted.")
+            return 1
+        del claude_settings["statusLine"]
+        _write_json_atomic(path, claude_settings)
+        print(f"cmux: removed statusLine from {path}")
+        return 0
+    if already:
+        print(f"cmux: statusLine in {path} already points at cmux; nothing to do.")
+        return 0
+    print(f"cmux: no statusLine configured in {path}.")
+    print(f"    Will set statusLine.command = \"{WIDGET_CMD}\".")
+    print("    Caveat: bare cmux widget only — no model/ctx/git info.")
+    print("    For richer output, install ccstatusline first then re-run.")
+    if not _confirm("Proceed? [y/N] ", assume_yes):
+        print("aborted.")
+        return 1
+    claude_settings["statusLine"] = {
+        "type": "command",
+        "command": WIDGET_CMD,
+        "padding": 0,
+    }
+    _write_json_atomic(path, claude_settings)
+    print(f"cmux: wrote statusLine to {path}")
+    return 0
+
+
+def cmd_setup_statusline(argv: list[str]) -> int:
+    """Wire `cmux statusline-widget` into Claude Code's statusline.
+
+    Auto-detects the user's setup; prompts before mutating any file.
+    Idempotent: safe to re-run. Supports --uninstall to reverse.
+    """
+    uninstall = False
+    assume_yes = False
+    for a in argv:
+        if a in ("--uninstall", "-u"):
+            uninstall = True
+        elif a in ("--yes", "-y"):
+            assume_yes = True
+        else:
+            print(f"cmux: unknown flag '{a}'", file=sys.stderr)
+            return 2
+    path = _claude_settings_path()
+    if not os.path.exists(path):
+        print(f"cmux: no Claude Code settings at {path}.")
+        print("    cmux works fine without Claude Code; setup-statusline skipped.")
+        return 0
+    claude_settings = _read_json(path)
+    if claude_settings is None:
+        print(f"cmux: could not parse {path}", file=sys.stderr)
+        return 1
+    sl_cmd = ""
+    sl = claude_settings.get("statusLine")
+    if isinstance(sl, dict):
+        sl_cmd = str(sl.get("command", "") or "")
+    if _looks_like_ccstatusline(sl_cmd):
+        return _setup_ccstatusline(uninstall, assume_yes)
+    if not sl_cmd.strip() or sl_cmd.strip() == WIDGET_CMD:
+        return _setup_vanilla(uninstall, assume_yes, claude_settings)
+    # Unknown statusline tool — never auto-edit someone else's setup.
+    snippet = sl_cmd if len(sl_cmd) <= 60 else sl_cmd[:57] + "..."
+    if uninstall:
+        print(f"cmux: your statusLine.command is custom ('{snippet}').")
+        print("    cmux has nothing to remove. Edit by hand if needed.")
+        return 0
+    print(f"cmux: detected custom statusLine.command ('{snippet}').")
+    print("    Cannot safely auto-edit. Add `cmux statusline-widget` to your")
+    print("    statusline composition manually. See the README for examples.")
+    return 0
+
+
 HELP = """\
 cmux — minimal Claude Code session multiplexer
 
@@ -477,6 +690,8 @@ Usage:
                                       -r/--reply: request the receiver echo an answer back
   cmux list [-l|--long]               List active sessions (-l adds cwd columns)
   cmux statusline-widget              Print "§ cmux:<name>" if $CMUX_SESSION set
+  cmux setup-statusline [-u] [-y]     Wire the widget into Claude Code's statusline
+                                      -u/--uninstall reverses it; -y/--yes skips prompts
   cmux help                           Show this help
 
 Examples:
@@ -539,6 +754,8 @@ def main(argv: list[str]) -> int:
         return cmd_list(argv[2:])
     if cmd == "statusline-widget":
         return cmd_statusline_widget()
+    if cmd == "setup-statusline":
+        return cmd_setup_statusline(argv[2:])
     print(f"cmux: unknown command '{cmd}'", file=sys.stderr)
     sys.stderr.write(HELP)
     return 2
