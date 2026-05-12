@@ -479,10 +479,18 @@ EOF
 
 This task does not modify code. It exercises the end-to-end flow against two real wrapped sessions to confirm everything wires up as designed. The agent executing this plan should perform it before declaring the work complete.
 
-- [ ] **Step 1: Reinstall the local CLI**
+- [ ] **Step 1: Point `~/.local/bin/cmux` at the working tree (don't pull from origin yet)**
 
-Run: `bash /Users/carlosli/work/cmux/install.sh`
-Expected: `installed: ~/.local/bin/cmux -> ~/.local/share/cmux/cmux`. (Or, equivalently, point the existing symlink at the working tree.)
+The standard `install.sh` clones into `~/.local/share/cmux` and symlinks
+`~/.local/bin/cmux` to that clone — running it now would `git pull --ff-only`
+from origin and miss our **unpushed** working-tree changes. For manual
+verification, point the symlink directly at the working tree:
+
+Run: `ln -sfn /Users/carlosli/work/cmux/cmux ~/.local/bin/cmux`
+Run: `readlink ~/.local/bin/cmux`
+Expected: `/Users/carlosli/work/cmux/cmux`
+
+After Step 7 (push), Step 8 restores the canonical install.
 
 - [ ] **Step 2: Open two wrapped sessions in two terminals**
 
@@ -530,7 +538,16 @@ git push
 gh auth switch -u NextDriveBot
 ```
 
-(Repo write access lives on the `echoulen` GitHub account, not `NextDriveBot`.)
+(Repo write access lives on the `echoulen` GitHub account, not `NextDriveBot`. Switch back to `NextDriveBot` after push to leave the global gh state unchanged.)
+
+- [ ] **Step 8: Restore the canonical install (`~/.local/share/cmux` clone)**
+
+```bash
+bash /Users/carlosli/work/cmux/install.sh
+readlink ~/.local/bin/cmux
+```
+
+Expected: symlink now points back at `~/.local/share/cmux/cmux` and that clone is at the freshly-pushed `origin/main`.
 
 ---
 
