@@ -84,7 +84,39 @@ test_statusline_widget() {
   fi
 }
 
+test_sidecar_metadata() {
+  echo "test_sidecar_metadata"
+  spawn_session shell-meta bash -lc 'sleep 30' || return
+  local meta="$HOME/.cmux/shell-meta.json"
+  if [[ -f "$meta" ]]; then
+    ok "sidecar JSON exists at ~/.cmux/shell-meta.json"
+  else
+    bad "sidecar JSON exists at ~/.cmux/shell-meta.json" "missing"
+    return
+  fi
+  # Confirm shape: pid is a number, cwd is a string, started_at is a number.
+  python3 - "$meta" <<'PY' || bad "sidecar JSON has pid/cwd/started_at" "shape mismatch"
+import json, sys
+m = json.load(open(sys.argv[1]))
+assert isinstance(m.get("pid"), int), m
+assert isinstance(m.get("cwd"), str) and m["cwd"], m
+assert isinstance(m.get("started_at"), int), m
+PY
+  if [[ $? -eq 0 ]]; then
+    ok "sidecar JSON has pid/cwd/started_at"
+  fi
+  # Kill the session and confirm the sidecar is unlinked.
+  kill "${SESSION_PIDS[${#SESSION_PIDS[@]}-1]}" 2>/dev/null || true
+  sleep 0.3
+  if [[ ! -f "$meta" ]]; then
+    ok "sidecar JSON removed when session exits"
+  else
+    bad "sidecar JSON removed when session exits" "still present"
+  fi
+}
+
 test_statusline_widget
+test_sidecar_metadata
 test_help
 
 echo
