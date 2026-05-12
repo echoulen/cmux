@@ -7,30 +7,26 @@ command.
 
 ## Install
 
+Two pieces, install in order. Plugin alone is useless without the CLI.
+
+**1. CLI** — required. Python 3.9+ stdlib only:
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/echoulen/cmux/main/install.sh | bash
 ```
 
-Symlinks `cmux` into `~/.local/bin` (source kept at `~/.local/share/cmux`).
 Re-run the same command to update.
 
-**Optional** — override default paths:
+**2. Claude Code plugin** — optional. Adds a `cmux` skill so agents inside
+`cmux run -- claude ...` auto-discover peers and know how to handle incoming
+`[Message from <name> via cmux]` lines:
 
 ```bash
-CMUX_INSTALL_DIR=/opt/cmux CMUX_BIN_DIR=/usr/local/bin \
-  curl -sSL https://raw.githubusercontent.com/echoulen/cmux/main/install.sh | bash
+/plugin marketplace add echoulen/cmux
+/plugin install cmux@cmux
 ```
 
-**Optional** — manual install instead:
-
-```bash
-git clone https://github.com/echoulen/cmux.git ~/.local/share/cmux
-ln -s ~/.local/share/cmux/cmux ~/.local/bin/cmux
-```
-
-Python 3.9+ stdlib only.
-
-## Commands
+## Usage
 
 ```bash
 cmux run [<name>] [-- cmd args...]   # wrap cmd in pty (default $SHELL)
@@ -38,37 +34,59 @@ cmux send <name> <message>           # inject <message>+Enter into <name>
 cmux list                            # list active sessions
 ```
 
-If `<name>` is omitted, defaults to `<basename(cmd)>-N`, picking the lowest
-free `N` (`claude-1`, `claude-2`, ...).
-
-## Examples
+Default name is `<basename(cmd)>-N` (`claude-1`, `claude-2`, ...). Each
+wrapped child gets `CMUX_SESSION=<name>` in its env; `cmux send` from inside
+a wrapped session auto-prefixes the message with `[Message from <name> via cmux] `
+(bold green) so the receiver knows the source.
 
 ```bash
-cmux run -- claude --permission-mode bypassPermissions
+cmux run -- claude --permission-mode bypassPermissions   # opens claude-1
 cmux send claude-1 "take a look at /tmp/foo.txt"
 cmux list
 ```
 
-## CMUX_SESSION
+## Two sessions talking
 
-Each wrapped child gets `CMUX_SESSION=<name>` in its env. When `cmux send` runs
-inside a wrapped session, it auto-prefixes the message with `[from <name>] `
-so the receiver knows the source.
+Spin up two wrapped Claude sessions in two terminals:
 
-## Claude Code plugin
+```bash
+# terminal A
+cmux run -- claude   # opens claude-1
 
-This repo also ships a Claude Code plugin (a single skill named `cmux`) that
-teaches the agent to detect `$CMUX_SESSION` and coordinate with peer sessions.
-Install via the Claude Code marketplace:
-
-```
-/plugin marketplace add echoulen/cmux
-/plugin install cmux@cmux
+# terminal B
+cmux run -- claude   # opens claude-2
 ```
 
-After install, agents running inside `cmux run -- claude ...` will
-automatically know they can `cmux list` peers and `cmux send <name> ...` to
-hand off work.
+Now claude-1 and claude-2 can poke each other directly. From inside
+claude-1, the agent runs:
+
+```bash
+cmux send claude-2 "starting auth refactor in src/auth/ — please draft tests for login"
+```
+
+In terminal B, claude-2's input prompt receives:
+
+```
+[Message from claude-1 via cmux] starting auth refactor in src/auth/ — please draft tests for login
+```
+
+(`[Message from claude-1 via cmux]` is rendered in bold green so the user
+can spot the relay at a glance.) claude-2 acknowledges the source, writes
+the tests, then relays back:
+
+```bash
+cmux send claude-1 "tests live in tests/auth/login.test.ts — 6 cases, all passing"
+```
+
+…which lands in terminal A as:
+
+```
+[Message from claude-2 via cmux] tests live in tests/auth/login.test.ts — 6 cases, all passing
+```
+
+The plugin (step 2 of Install) is what teaches each agent to (a) recognize
+those prefixed lines as cmux relays and (b) reach for `cmux send` when
+they want to hand work off.
 
 ## How it works
 
@@ -80,9 +98,8 @@ hand off work.
                                         [cmux send <name> "..."]
 ```
 
-Host terminal in raw mode → escape sequences and modifier keys pass through.
-A session lives only as long as its wrapper; closing the owning terminal
-kills the child (cmux has no detach/attach).
+Host terminal stays in raw mode. A session lives only as long as its
+wrapper; closing the owning terminal kills the child.
 
 ## License
 

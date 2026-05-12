@@ -1,6 +1,6 @@
 ---
 name: cmux
-description: Coordinate with peer Claude sessions via the `cmux` CLI. Use when $CMUX_SESSION is set in the environment (you are running inside a cmux-wrapped session), or when the user references "another session / another terminal / claude-N" and asks you to talk to it. Lets you list peer sessions and inject messages into them as if the user had typed there. NOTE: this plugin only ships the skill — the `cmux` CLI binary must be installed separately (see Prerequisite below).
+description: Coordinate with peer Claude sessions via the `cmux` CLI. Invoke when (a) an input line begins with `[Message from <name> via cmux]` — that marker means a peer Claude session relayed the message to you, and you must name the source in your reply rather than treat it as a normal user prompt; or (b) `$CMUX_SESSION` is set and the user asks you to talk to "another session / another terminal / claude-N". Lets you list peers and inject messages into them. NOTE: this plugin only ships the skill — the `cmux` CLI binary must be installed separately (see Prerequisite below).
 ---
 
 # cmux — peer session coordination
@@ -33,13 +33,12 @@ guess at peer-session bytes through other means.
 
 ## When to use
 
+- An input line begins with `[Message from <name> via cmux] <body>` — peer
+  session `<name>` injected it. Name the source in your reply, then answer
+  the body as a peer request; do not auto-reply via `cmux send` unless the
+  user asks.
 - `$CMUX_SESSION` is set and the user asks you to coordinate with, hand off
-  to, notify, or relay a message to another session.
-- The user mentions "the other claude / another terminal / claude-2 / my
-  other session" and wants action there.
-- You receive an input line starting with `[from <name>] ...` — that is a
-  message a peer session injected via `cmux send`. You may reply by sending
-  back to that peer.
+  to, notify, or relay a message to another session / terminal / claude-N.
 
 ## Commands
 
@@ -49,8 +48,8 @@ cmux send <name> <message>    # inject "<message>\r" into <name>'s pty
 ```
 
 `cmux send` invoked from inside a wrapped session auto-prefixes the message
-with `[from $CMUX_SESSION] ` — the receiver sees the source. You don't need
-to add the prefix yourself.
+with `[Message from $CMUX_SESSION via cmux] ` (bold green) — the receiver
+sees the source. You don't need to add the prefix yourself.
 
 ## Workflow
 
