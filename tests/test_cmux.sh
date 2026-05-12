@@ -6,8 +6,10 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CMUX="${CMUX_BIN:-$REPO_ROOT/cmux}"
 # macOS sockaddr_un is capped at 104 bytes; the default $TMPDIR
-# (/var/folders/...) plus ~/.cmux/<name>.sock overflows it. Force /tmp.
-TEST_TMP="$(TMPDIR=/tmp mktemp -d -t cmux-test.XXXXXX)"
+# (/var/folders/...) plus ~/.cmux/<name>.sock overflows it. Use a literal
+# /tmp template — note `mktemp -t` ignores TMPDIR on macOS for security,
+# so we have to write the path out fully.
+TEST_TMP="$(mktemp -d /tmp/cmux-test.XXXXXX)"
 # Isolate ~/.cmux for tests so we never touch the user's real sessions.
 # cmux resolves ~/.cmux from $HOME at startup, so override before invoking it.
 export HOME="$TEST_TMP/home"
