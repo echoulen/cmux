@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CMUX="${CMUX_BIN:-$REPO_ROOT/cmux}"
 TEST_TMP="$(mktemp -d -t cmux-test.XXXXXX)"
 # Isolate ~/.cmux for tests so we never touch the user's real sessions.
+# cmux resolves ~/.cmux from $HOME at startup, so override before invoking it.
 export HOME="$TEST_TMP/home"
 mkdir -p "$HOME"
 
@@ -38,7 +39,8 @@ bad() {
 # Spawn `cmux run <name> -- <cmd...>` in the background. Records the pid.
 spawn_session() {
   local name="$1"; shift
-  setsid "$CMUX" run "$name" -- "$@" </dev/null >/dev/null 2>&1 &
+  python3 -c "import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])" \
+    "$CMUX" run "$name" -- "$@" </dev/null >/dev/null 2>&1 &
   SESSION_PIDS+=("$!")
   # Wait up to 2s for the socket to appear.
   for _ in $(seq 1 20); do
