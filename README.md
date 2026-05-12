@@ -19,7 +19,7 @@ Re-run the same command to update.
 
 **2. Claude Code plugin** — optional. Adds a `cmux` skill so agents inside
 `cmux run -- claude ...` auto-discover peers and know how to handle incoming
-`[Message from <name> via cmux]` lines:
+`[<name> via cmux]` lines:
 
 ```bash
 /plugin marketplace add echoulen/cmux
@@ -37,10 +37,10 @@ cmux list                            # list active sessions
 
 Default name is `<basename(cmd)>-N` (`claude-1`, `claude-2`, ...). Each
 wrapped child gets `CMUX_SESSION=<name>` in its env; `cmux send` from inside
-a wrapped session auto-prefixes the message with `[Message from <name> via cmux] `
-so the receiver knows the source. Add `-r` / `--reply` to additionally embed
-a `reply via: cmux send <name> "<your answer>"` instruction in the prefix —
-the receiver's skill treats that as a contract to echo an answer back.
+a wrapped session auto-prefixes the message with `[<name> via cmux] ` so the
+receiver knows the source. Add `-r` / `--reply` to append a `⇄` symbol —
+`[<name> via cmux ⇄] ` — which the receiver's skill treats as a contract to
+echo an answer back via `cmux send <name>`.
 
 ```bash
 cmux run -- claude --permission-mode bypassPermissions   # opens claude-1
@@ -70,7 +70,7 @@ cmux send claude-2 "starting auth refactor in src/auth/ — please draft tests f
 In terminal B, claude-2's input prompt receives:
 
 ```
-[Message from claude-1 via cmux] starting auth refactor in src/auth/ — please draft tests for login
+[claude-1 via cmux] starting auth refactor in src/auth/ — please draft tests for login
 ```
 
 claude-2 acknowledges the source, writes the tests, then relays back:
@@ -82,7 +82,7 @@ cmux send claude-1 "tests live in tests/auth/login.test.ts — 6 cases, all pass
 …which lands in terminal A as:
 
 ```
-[Message from claude-2 via cmux] tests live in tests/auth/login.test.ts — 6 cases, all passing
+[claude-2 via cmux] tests live in tests/auth/login.test.ts — 6 cases, all passing
 ```
 
 ### Asking with `-r`
@@ -97,17 +97,17 @@ cmux send -r claude-2 "what's the absolute path of your working dir?"
 claude-2's input prompt receives:
 
 ```
-[Message from claude-1 via cmux, reply via: cmux send claude-1 "<your answer>"] what's the absolute path of your working dir?
+[claude-1 via cmux ⇄] what's the absolute path of your working dir?
 ```
 
-The cmux skill in claude-2's session treats `reply via:` as a contract.
+The cmux skill in claude-2's session treats the `⇄` symbol as a contract.
 After answering its user, claude-2 runs:
 
 ```bash
 cmux send claude-1 "/Users/alice/work/project"
 ```
 
-…which lands in claude-1's prompt as a normal `[Message from claude-2 via cmux] /Users/alice/work/project` line.
+…which lands in claude-1's prompt as a normal `[claude-2 via cmux] /Users/alice/work/project` line.
 
 The plugin (step 2 of Install) is what teaches each agent to (a) recognize
 those prefixed lines as cmux relays and (b) reach for `cmux send` when

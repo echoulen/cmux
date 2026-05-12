@@ -13,9 +13,10 @@ can inject input as if the user had typed it.
 
 Each wrapped child gets CMUX_SESSION=<name> in its env. When `cmux send` is
 invoked from inside a wrapped session, it auto-prefixes the message with
-"[Message from <CMUX_SESSION> via cmux] " so the receiver knows where the
-poke came from. Adding `-r`/`--reply` further declares that the receiver is
-expected to echo an answer back via `cmux send <CMUX_SESSION>`.
+"[<CMUX_SESSION> via cmux] " so the receiver knows where the poke came from.
+Adding `-r`/`--reply` appends a `⇄` symbol — "[<CMUX_SESSION> via cmux ⇄] " —
+which declares that the receiver is expected to echo an answer back via
+`cmux send <CMUX_SESSION>`.
 """
 from __future__ import annotations
 
@@ -289,13 +290,9 @@ def cmd_send(name: str, message: str, expect_reply: bool = False) -> int:
             return 1
     if sender and sender != name and message:
         if expect_reply:
-            reply_cmd = f'cmux send "{sender}" "<your answer>"'
-            message = (
-                f"[Message from {sender} via cmux, reply via: {reply_cmd}] "
-                f"{message}"
-            )
+            message = f"[{sender} via cmux ⇄] {message}"
         else:
-            message = f"[Message from {sender} via cmux] {message}"
+            message = f"[{sender} via cmux] {message}"
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         s.connect(path)
@@ -363,9 +360,10 @@ Examples:
   cmux list
 
 Inside a wrapped session, $CMUX_SESSION holds the current session name and
-`cmux send` auto-prefixes messages with "[Message from $CMUX_SESSION via cmux] ".
-Pass `-r`/`--reply` to additionally tell the receiver that an answer is
-expected back via `cmux send $CMUX_SESSION`.
+`cmux send` auto-prefixes messages with "[$CMUX_SESSION via cmux] ".
+Pass `-r`/`--reply` to append a `⇄` symbol — "[$CMUX_SESSION via cmux ⇄] " —
+which tells the receiver an answer is expected back via
+`cmux send $CMUX_SESSION`.
 
 Sockets live under ~/.cmux/<name>.sock.
 """

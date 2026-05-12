@@ -1,6 +1,6 @@
 ---
 name: cmux
-description: Coordinate with peer Claude sessions via the `cmux` CLI. Invoke when (a) an input line begins with `[Message from <name> via cmux]` — that marker means a peer Claude session relayed the message to you, and you must name the source in your reply rather than treat it as a normal user prompt; (b) the same line also contains `reply via: cmux send …`, which means the sender REQUIRES you to echo an answer back via that exact command; or (c) `$CMUX_SESSION` is set and the user asks you to talk to "another session / another terminal / claude-N". Lets you list peers and inject messages into them. NOTE: this plugin only ships the skill — the `cmux` CLI binary must be installed separately (see Prerequisite below).
+description: Coordinate with peer Claude sessions via the `cmux` CLI. Invoke when (a) an input line begins with `[<name> via cmux]` — that marker means a peer Claude session relayed the message to you, and you must name the source in your reply rather than treat it as a normal user prompt; (b) the same prefix contains the `⇄` symbol (i.e. `[<name> via cmux ⇄]`), which means the sender REQUIRES you to echo an answer back via `cmux send <name>`; or (c) `$CMUX_SESSION` is set and the user asks you to talk to "another session / another terminal / claude-N". Lets you list peers and inject messages into them. NOTE: this plugin only ships the skill — the `cmux` CLI binary must be installed separately (see Prerequisite below).
 ---
 
 # cmux — peer session coordination
@@ -31,13 +31,25 @@ it), the plugin is installed but the CLI is not. Stop and tell the user:
 Do not attempt to install it yourself, fall back to ad-hoc pty hacks, or
 guess at peer-session bytes through other means.
 
+## Prefix grammar
+
+Every message injected by `cmux send` from inside a wrapped session is
+auto-prefixed. There are exactly two forms:
+
+| Prefix                       | Meaning                                       |
+| ---------------------------- | --------------------------------------------- |
+| `[<name> via cmux] <body>`   | Fire-and-forget poke from peer `<name>`.      |
+| `[<name> via cmux ⇄] <body>` | Reply-expected: peer `<name>` is waiting on `cmux send <name> "<answer>"`. |
+
+The `⇄` symbol is the contract: see "Reply-expected messages" below.
+
 ## When to use
 
-- An input line begins with `[Message from <name> via cmux] <body>` — peer
-  session `<name>` injected it. Name the source in your reply, then answer
-  the body as a peer request. Do NOT auto-reply via `cmux send` unless either
-  (a) the prefix contains `reply via: <command>` (see "Reply-expected
-  messages" below), or (b) the user explicitly asks you to.
+- An input line begins with `[<name> via cmux]` or `[<name> via cmux ⇄]` —
+  peer session `<name>` injected it. Name the source in your reply, then
+  answer the body as a peer request. Do NOT auto-reply via `cmux send`
+  unless either (a) the prefix contains the `⇄` symbol, or (b) the user
+  explicitly asks you to.
 - `$CMUX_SESSION` is set and the user asks you to coordinate with, hand off
   to, notify, or relay a message to another session / terminal / claude-N.
 
@@ -50,41 +62,39 @@ cmux send -r <name> <message>      # same, but declare that a reply is expected
 ```
 
 `cmux send` invoked from inside a wrapped session auto-prefixes the message
-with `[Message from $CMUX_SESSION via cmux] ` — the receiver sees the source.
-You don't need to add the prefix yourself.
+with `[$CMUX_SESSION via cmux] ` — the receiver sees the source. You don't
+need to add the prefix yourself.
 
 Pass `-r` (or `--reply`) when you are asking the peer for information you
-need to continue your own work. The receiver is contractually obligated to
-echo an answer back via `cmux send $CMUX_SESSION`. For fire-and-forget
-notifications ("starting refactor", "tests passing"), omit the flag.
+need to continue your own work. The CLI appends ` ⇄` to the prefix, and the
+receiver is contractually obligated to echo an answer back via
+`cmux send $CMUX_SESSION`. For fire-and-forget notifications ("starting
+refactor", "tests passing"), omit the flag.
 
 ## Reply-expected messages
 
-If an incoming line begins with
-`[Message from <name> via cmux, reply via: <command>] <body>`,
-treat it as a request that REQUIRES a reply:
+If an incoming line begins with `[<name> via cmux ⇄] <body>`, treat it as a
+request that REQUIRES a reply:
 
 1. Produce your answer to `<body>` as you normally would. Your visible
    response to the user is unchanged — they can still see it locally.
-2. After answering, you MUST run `<command>`, replacing the literal
-   placeholder `<your answer>` inside the command with a concise string that
-   conveys your answer to the sender. The sender is waiting on that exact
+2. After answering, you MUST run `cmux send <name> "<your answer>"`, where
+   `<name>` is the sender from the prefix and `<your answer>` is a concise
+   string conveying your answer. The sender is waiting on that exact
    channel.
 
-   Worked example: if the prefix you received says
-   `reply via: cmux send claude-1 "<your answer>"`, and your actual answer
-   is `/Users/alice/work`, run:
+   Worked example: if you receive
+   `[claude-1 via cmux ⇄] what's your pwd?` and your actual answer is
+   `/Users/alice/work`, run:
    ```bash
    cmux send claude-1 "/Users/alice/work"
    ```
-   Do NOT send the literal placeholder text `<your answer>` — it exists
-   only to mark where your real answer goes.
-3. If you cannot answer (refusal, missing info, blocked), still run the
-   command — send a short string explaining why no answer is forthcoming,
-   so the sender isn't left waiting.
+3. If you cannot answer (refusal, missing info, blocked), still run
+   `cmux send <name>` with a short string explaining why no answer is
+   forthcoming, so the sender isn't left waiting.
 
-If the prefix has NO `reply via:` segment, do not run `cmux send` back to
-the sender unless the user explicitly asks you to.
+If the prefix has NO `⇄` symbol, do not run `cmux send` back to the sender
+unless the user explicitly asks you to.
 
 ## Workflow
 
@@ -95,9 +105,9 @@ the sender unless the user explicitly asks you to.
 4. If you expect a reply, send with `cmux send -r <target> "<question>"`.
    The peer's agent is then obligated to relay an answer back via
    `cmux send $CMUX_SESSION "<answer>"` — which lands in your input prompt
-   as another `[Message from <peer> via cmux] ...` line. There is no
-   programmatic correlation between request and reply; the user (and you)
-   simply watch for the next inbound message.
+   as another `[<peer> via cmux] ...` line. There is no programmatic
+   correlation between request and reply; the user (and you) simply watch
+   for the next inbound message.
 
 ## Examples
 
@@ -121,8 +131,8 @@ cmux send -r claude-2 "what's the current pwd in your session?"
   input. You will not see the peer's reply unless the user relays it.
 - With `-r`: the peer's agent is obligated to send an answer back via
   `cmux send $CMUX_SESSION "<their answer>"`, which lands in your input
-  prompt as a normal `[Message from <peer> via cmux] ...` line. There is no
-  programmatic correlation; just watch for the next inbound message.
+  prompt as a normal `[<peer> via cmux] ...` line. There is no programmatic
+  correlation; just watch for the next inbound message.
 - The peer treats the injected text as user input — be careful with anything
   destructive, the peer may act on it without further confirmation.
 - If `$CMUX_SESSION` is unset, this skill does not apply — you are not inside
